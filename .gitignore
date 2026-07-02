@@ -1,0 +1,40 @@
+# Build output
+/build/
+/build-*/
+/_package/
+/out/
+cmake-build-*/
+
+# CMake / FetchContent
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+_deps/
+*.cmake.stamp
+
+# Fetched / downloaded vendor SDK (never commit a proprietary SDK)
+/vendor-sdk/
+/*-SDK-*/
+
+# Compiled artifacts
+*.dll
+*.dylib
+*.so
+*.lib
+*.a
+*.exp
+*.pdb
+*.obj
+*.o
+*.exe
+
+# Installer output
+*Setup-*.exe
+*.pkg
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
