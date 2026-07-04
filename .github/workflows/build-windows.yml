@@ -1,0 +1,84 @@
+name: build-windows
+
+# Minimal "does the template still build against the pinned runtime?" check.
+#
+# The plug-in DLL links the runtime's public ABI (DisplayXRClient.lib + headers),
+# which is produced by building displayxr-runtime. So this workflow checks out
+# the runtime at the tag this template pins (CMakeLists.txt DXR_RUNTIME_GIT_TAG)
+# as a sibling and lets scripts\build-windows.bat detect it — that path inherits
+# the runtime tree's vcpkg toolchain + OpenXR loader, which the pure-FetchContent
+# path does not provide. It mirrors the dependency setup in the runtime's own
+# build-windows.yml.
+#
+# VENDOR TODO: when you rename drv_example -> drv_<vendor>, update the DLL name
+# in the final "confirm artifact" step. Keep the pinned runtime tag here in sync
+# with CMakeLists.txt (the drift-audit in displayxr-runtime checks this).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request: {}
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout template
+        uses: actions/checkout@v5
+        with:
+          path: template
+
+      # The runtime tag MUST equal DXR_RUNTIME_GIT_TAG in template/CMakeLists.txt.
+      - name: Checkout pinned displayxr-runtime (sibling)
+        uses: actions/checkout@v5
+        with:
+          repository: DisplayXR/displayxr-runtime
+          ref: v1.27.0
+          submodules: recursive
+          path: displayxr-runtime
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+
+      - name: Setup MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Provision OpenXR loader into the runtime sibling
+        shell: pwsh
+        run: |
+          # The build script looks for openxr_sdk/x64/lib/openxr_loader.lib next
+          # to the runtime checkout. Keep this rev == the runtime's vendored
+          # openxr_includes rev (1.1.51 at the pinned tag).
+          $ver = '1.1.51'
+          $url = "https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/release-$ver/openxr_loader_windows-$ver.zip"
+          Invoke-WebRequest -Uri $url -OutFile openxr_loader.zip
+          Expand-Archive -Path openxr_loader.zip -DestinationPath displayxr-runtime/openxr_sdk -Force
+
+      - name: Build plug-in against the pinned runtime
+        shell: cmd
+        env:
+          DXR_RUNTIME_SOURCE_DIR: ${{ github.workspace }}\displayxr-runtime
+        run: |
+          cd template
+          call scripts\build-windows.bat build
+
+      - name: Confirm plug-in DLL was produced
+        shell: pwsh
+        run: |
+          $dll = 'template/_package/bin/plugins/DisplayXR-ExampleVendor.dll'
+          if (-Not (Test-Path $dll)) {
+            Write-Error "Plug-in DLL not found at $dll"
+            exit 1
+          }
+          Write-Host "Built $dll"

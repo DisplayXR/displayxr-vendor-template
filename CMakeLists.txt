@@ -48,12 +48,12 @@ if(DXR_RUNTIME_SOURCE_DIR)
     add_subdirectory("${DXR_RUNTIME_SOURCE_DIR}" runtime-build EXCLUDE_FROM_ALL)
 else()
     include(FetchContent)
-    # VENDOR TODO: pin this to a displayxr-runtime release tag whose
-    # XRT_PLUGIN_API_VERSION_CURRENT matches what this plug-in is built against.
-    # The runtime's loader REJECTS any plug-in reporting a different ABI major
-    # (ADR-020 rule 3) and silently falls back to sim_display. Bump this tag +
-    # rebuild whenever you adopt a newer ABI major.
-    set(DXR_RUNTIME_GIT_TAG "main" CACHE STRING
+    # Pinned to a displayxr-runtime release tag whose XRT_PLUGIN_API_VERSION_CURRENT
+    # matches what this plug-in is built against. The runtime's loader REJECTS any
+    # plug-in reporting a different ABI major (ADR-020 rule 3) and silently falls
+    # back to sim_display.
+    # VENDOR TODO: bump this tag + rebuild whenever you adopt a newer ABI major.
+    set(DXR_RUNTIME_GIT_TAG "v1.27.0" CACHE STRING
         "displayxr-runtime git ref to fetch (pin to a release tag for reproducible builds).")
     message(STATUS "Fetching displayxr-runtime via FetchContent @ ${DXR_RUNTIME_GIT_TAG}")
     FetchContent_Declare(
