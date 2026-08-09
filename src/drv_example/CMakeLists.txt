@@ -96,6 +96,23 @@ set_target_properties(DisplayXR-ExampleVendor PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 
+# --- Loadability discipline (Linux) -------------------------------------
+# --no-undefined makes an unresolved symbol a LINK error instead of a runtime
+# surprise. This matters more for a plug-in than for anything else: on Linux a
+# shared library links happily with dangling references and only fails when the
+# loader BINDS them, so a completely green build can still ship a .so the runtime
+# cannot dlopen — and the failure appears on the customer's box as
+# `undefined symbol: <x>`, arbitrarily far from the build that produced it.
+# MSVC and macOS's two-level namespace both reject this at link time; GNU ld is
+# the odd one out, so ask for the same strictness explicitly.
+#
+# Vendors forking this template: keep this. displayxr-runtime sets the same flag
+# globally (CompilerFlags.cmake) and displayxr-unity#249 is the case study for
+# what its absence costs.
+if(UNIX AND NOT APPLE)
+    target_link_options(DisplayXR-ExampleVendor PRIVATE "LINKER:--no-undefined")
+endif()
+
 # --- Install ------------------------------------------------------------
 # Drops the DLL under <prefix>/bin/plugins/ — the installer picks it up there.
 install(
