@@ -52,7 +52,7 @@ jobs:
       - name: Rule-5 ABI pin self-check
         shell: pwsh
         run: |
-          $line = Select-String -Path 'template/CMakeLists.txt' -Pattern 'DXR_RUNTIME_GIT_TAG\s+"([^"]+)"' | Select-Object -First 1
+          $line = Select-String -Path 'template/CMakeLists.txt' -Pattern '^\s*set\(DXR_RUNTIME_GIT_TAG\s+"([^"]+)"' | Select-Object -First 1
           if (-not $line) {
             Write-Error "Rule-5 self-check: could not find DXR_RUNTIME_GIT_TAG in CMakeLists.txt"
             exit 1
