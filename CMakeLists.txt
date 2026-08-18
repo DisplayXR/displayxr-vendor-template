@@ -56,8 +56,9 @@ else()
     #
     # This value MUST equal RUNTIME_REF in .github/workflows/build-windows.yml:
     # the "Rule-5 ABI pin self-check" step there regexes this line and hard-fails
-    # the build on drift, so keep the literal `set(DXR_RUNTIME_GIT_TAG "vX.Y.Z"`
-    # shape (no computed value, no variable indirection).
+    # the build on drift. That check anchors on a line that STARTS with the set()
+    # call and takes the quoted value, so keep this a plain literal string here - a
+    # computed value or a variable indirection would defeat it.
     #
     # There is no separate ABI-floor constant to keep in step: the plug-in reports
     # XRT_PLUGIN_API_VERSION_CURRENT from the headers of whichever runtime this tag
