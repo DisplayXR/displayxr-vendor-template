@@ -18,6 +18,16 @@
  *
  *   // VENDOR TODO: replace process_atlas' shader with your real weaver.
  *
+ * **If your display weaves in its own hardware** (an FPGA or ASIC on the scaler
+ * board) you do not write a weaver at all — you hand the chip a PACKED frame and
+ * it weaves during scanout. Set `DXR_EXAMPLE_WEAVE_MODE=hardware` to see that
+ * path: process_atlas becomes a straight passthrough, because the atlas the
+ * compositor hands you ALREADY IS the packed frame. Declare tile geometry that
+ * matches your chip's expected pack (2x1 for side-by-side half, 1x2 for
+ * top-and-bottom, an NxM grid for a quilt — see example_device.c) and the atlas
+ * comes out panel-sized with each view in its half. Such a plug-in must also
+ * declare its weave scope; see example_dp_d3d11_get_scanout_caps below.
+ *
  * Of the ~19 D3D11 DP vtable slots, only process_atlas + destroy are mandatory
  * (the rest are optional and NULL-safe via the runtime's XRT_DP_HAS_SLOT gate).
  * This file leaves all the optional slots NULL except is_alpha_native.
@@ -82,6 +92,27 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 )";
 
 
+// HARDWARE-WEAVE pixel shader (DXR_EXAMPLE_WEAVE_MODE=hardware): pass the atlas
+// through unchanged.
+//
+// This looks too simple to be right, and it is the whole point. The compositor
+// already laid the views out as a tile_columns x tile_rows grid at panel size —
+// which, when your declared tile geometry matches what your chip expects, IS
+// the packed frame (2x1 @ 0.5,1.0 => left view in the left half, right view in
+// the right half, at exactly the target's dimensions). There is nothing to
+// rearrange. A real hardware-weaving DP does the same blit plus whatever
+// signalling its chip needs: a watermark row stamped here, or a sideband
+// command sent from request_display_mode().
+static const char *k_ps_hw_pack_source = R"(
+Texture2D    atlas_tex : register(t0);
+SamplerState samp      : register(s0);
+
+float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
+    return atlas_tex.Sample(samp, uv);
+}
+)";
+
+
 struct tile_params_cb
 {
 	float tile_cols_inv;
@@ -101,7 +132,22 @@ struct example_dp_d3d11
 	ID3D11PixelShader *ps;
 	ID3D11SamplerState *sampler;
 	ID3D11Buffer *tile_cb;
+	//! True when built in DXR_EXAMPLE_WEAVE_MODE=hardware. Logging only —
+	//! the mode is baked into which pixel shader `ps` holds.
+	bool hardware_weave;
 };
+
+/*!
+ * `DXR_EXAMPLE_WEAVE_MODE=hardware` selects the packed-frame passthrough for a
+ * display whose FPGA/ASIC does the weave. Anything else (including unset) keeps
+ * the GPU stub weaver.
+ */
+static bool
+example_hardware_weave_from_env(void)
+{
+	const char *v = getenv("DXR_EXAMPLE_WEAVE_MODE");
+	return v != nullptr && strcmp(v, "hardware") == 0;
+}
 
 static inline struct example_dp_d3d11 *
 example_dp(struct xrt_display_processor_d3d11 *xdp)
@@ -179,6 +225,58 @@ example_dp_d3d11_process_atlas(struct xrt_display_processor_d3d11 *xdp,
 	ID3D11ShaderResourceView *null_srv = nullptr;
 	ctx->PSSetShaderResources(0, 1, &null_srv);
 }
+
+#ifdef XRT_DP_D3D11_HAS_SCANOUT_CAPS
+/*!
+ * Declare how much of the panel this DP's output transform covers.
+ *
+ * A GPU weaver produces final pixels for the canvas it was handed, so it is
+ * `CANVAS` and could equally leave this slot NULL — that is what the runtime
+ * assumes for any plug-in that doesn't implement it. A plug-in for a display
+ * that weaves in hardware MUST answer honestly, because the two hardware shapes
+ * have completely different windowing consequences:
+ *
+ *  - `REGION` — your chip accepts a "weave only this rect, pass the rest
+ *    through" descriptor. Windowed apps work; implement the zone slots
+ *    (get_local_zone_caps / publish_local_zone_mask) to push the rect, and
+ *    snap_window_rect to keep placement on your lens phase.
+ *  - `SCANOUT` — your chip transforms the entire incoming frame. Only a
+ *    panel-scoped (fullscreen) presentation can be correct, and saying so is
+ *    what makes the runtime log a usable diagnostic instead of shipping a frame
+ *    your chip will shred.
+ *
+ * `DXR_EXAMPLE_WEAVE_SCOPE=canvas|region|scanout` drives it here so the routing
+ * can be exercised without hardware. A real plug-in returns a constant.
+ *
+ * The #ifdef keeps this template buildable against a runtime pin older than the
+ * slot; the macro is defined by xrt_display_processor_d3d11.h once the pin
+ * carries it.
+ */
+static bool
+example_dp_d3d11_get_scanout_caps(struct xrt_display_processor_d3d11 *xdp, struct xrt_dp_scanout_caps *out_caps)
+{
+	(void)xdp;
+	// Honour the caller's struct_size — never write past what the runtime
+	// allocated (ADR-020).
+	if (out_caps == nullptr || out_caps->struct_size < XRT_DP_SCANOUT_CAPS_SIZE_V1) {
+		return false;
+	}
+
+	const char *v = getenv("DXR_EXAMPLE_WEAVE_SCOPE");
+	enum xrt_dp_weave_scope scope = XRT_DP_WEAVE_SCOPE_CANVAS;
+	if (v != nullptr && strcmp(v, "region") == 0) {
+		scope = XRT_DP_WEAVE_SCOPE_REGION;
+	} else if (v != nullptr && strcmp(v, "scanout") == 0) {
+		scope = XRT_DP_WEAVE_SCOPE_SCANOUT;
+	}
+
+	out_caps->weave_scope = static_cast<uint32_t>(scope);
+	for (size_t i = 0; i < sizeof(out_caps->reserved) / sizeof(out_caps->reserved[0]); i++) {
+		out_caps->reserved[i] = 0; // reserved words MUST be zeroed.
+	}
+	return true;
+}
+#endif // XRT_DP_D3D11_HAS_SCANOUT_CAPS
 
 /*!
  * This DP samples the atlas and writes its alpha straight through, so it is
@@ -266,12 +364,20 @@ example_dp_factory_d3d11(void *d3d11_device,
 	dp->base.process_atlas = example_dp_d3d11_process_atlas; // mandatory
 	dp->base.destroy = example_dp_d3d11_destroy;             // mandatory
 	dp->base.is_alpha_native = example_dp_d3d11_is_alpha_native;
+#ifdef XRT_DP_D3D11_HAS_SCANOUT_CAPS
+	dp->base.get_scanout_caps = example_dp_d3d11_get_scanout_caps;
+#endif
 	// All other slots (get_predicted_eye_positions, request_display_mode,
 	// zone publish, set_transparent_background, snap_window_rect, ...) stay
 	// NULL — they are optional. VENDOR TODO: implement the ones your product
 	// needs (e.g. get_predicted_eye_positions for MANAGED eye tracking,
 	// set_transparent_background for see-through, request_display_mode for a
 	// hardware 2D/3D toggle).
+
+	dp->hardware_weave = example_hardware_weave_from_env();
+	U_LOG_I("example_dp D3D11: %s", dp->hardware_weave
+	                                    ? "hardware-weave mode — emitting a packed frame, the panel weaves it"
+	                                    : "GPU stub weave (set DXR_EXAMPLE_WEAVE_MODE=hardware for the other shape)");
 
 	ID3DBlob *blob = nullptr;
 	if (FAILED(compile_shader(k_vs_source, "main", "vs_5_0", &blob))) {
@@ -285,7 +391,8 @@ example_dp_factory_d3d11(void *d3d11_device,
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
-	if (FAILED(compile_shader(k_ps_source, "main", "ps_5_0", &blob))) {
+	if (FAILED(compile_shader(dp->hardware_weave ? k_ps_hw_pack_source : k_ps_source, "main", "ps_5_0",
+	                          &blob))) {
 		example_dp_d3d11_destroy(&dp->base);
 		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}

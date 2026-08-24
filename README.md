@@ -98,6 +98,47 @@ needs.
 `DXR_RUNTIME_GIT_TAG` in the top-level `CMakeLists.txt` to a runtime release whose
 ABI major matches, and rebuild when you adopt a newer major.
 
+## If your display weaves in hardware (FPGA / ASIC)
+
+Not every 3D display expects final woven subpixels. If yours does the weave in
+its own silicon — an FPGA or ASIC on the scaler board, fed an ordinary video
+frame — your plug-in gets *simpler*, and this template ships that shape too:
+
+```bat
+set DXR_EXAMPLE_WEAVE_MODE=hardware     :: process_atlas becomes a passthrough
+set DXR_EXAMPLE_WEAVE_SCOPE=region      :: canvas | region | scanout
+```
+
+**Why passthrough is the whole weave.** The compositor already lays the views
+out as a `tile_columns x tile_rows` grid at panel size. Declare tile geometry
+matching what your chip expects and the atlas you are handed **already is** the
+packed frame — `2x1 @ 0.5,1.0` gives you left view in the left half, right view
+in the right half, at exactly the target's dimensions. Side-by-side half is
+`2x1`, top-and-bottom is `1x2`, an N-view quilt is any grid up to 8 views. There
+is nothing to rearrange; a real plug-in adds only its signalling (a watermark
+row stamped in `process_atlas`, or a sideband command from
+`request_display_mode`).
+
+**Declaring your weave scope is the one thing you must not skip.** The runtime
+cannot infer how much of the panel your chip transforms, and it decides what
+presentations can be correct:
+
+| Scope | Your chip | Windowed apps |
+|---|---|---|
+| `CANVAS` | GPU weaver — final pixels for the canvas you were handed | native (and the default when the slot is NULL) |
+| `REGION` | takes a "weave only this rect" descriptor | native — implement the zone slots to push the rect |
+| `SCANOUT` | transforms the whole frame; no rect | need a panel-scoped (fullscreen) presentation |
+
+See `example_dp_d3d11_get_scanout_caps`, and the runtime's
+[vendor onboarding guide](https://github.com/DisplayXR/displayxr-runtime/blob/main/docs/guides/vendor-plugin-onboarding.md)
+section *"Displays that weave in hardware (FPGA / ASIC)"* for the full contract
+— including mode signalling, display timing, and what the runtime will not do
+for you.
+
+The slot is `#ifdef`-guarded on `XRT_DP_D3D11_HAS_SCANOUT_CAPS` so this template
+keeps building against a `DXR_RUNTIME_GIT_TAG` that predates it; bump the pin to
+turn it on.
+
 ## Building
 
 ```bat
