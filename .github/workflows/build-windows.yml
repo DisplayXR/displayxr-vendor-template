@@ -41,7 +41,7 @@ jobs:
       # The displayxr-runtime release this template builds against. MUST equal
       # DXR_RUNTIME_GIT_TAG in CMakeLists.txt — enforced by the Rule-5 self-check
       # step below, so the two pins cannot silently drift.
-      RUNTIME_REF: v2.7.1
+      RUNTIME_REF: v2.12.0
     steps:
       - name: Checkout template
         uses: actions/checkout@v5

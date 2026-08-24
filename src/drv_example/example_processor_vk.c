@@ -205,6 +205,55 @@ example_dp_vk_destroy(struct xrt_display_processor *xdp)
 }
 
 
+#ifdef XRT_DP_VK_HAS_SCANOUT_CAPS
+/*!
+ * Declare how much of the panel this DP's output transform covers.
+ *
+ * NOTE THE POINTER TYPE. Every other method in this file takes a
+ * `struct xrt_display_processor *` because those are slots on the GENERIC base.
+ * This one is an appended slot on the VK VARIANT, so it takes a
+ * `struct xrt_display_processor_vk *` and is registered on `dp->base`, not
+ * `dp->base.base`. (The scope query could not go on the generic base: this
+ * variant embeds that base BY VALUE, so growing it would shift every appended
+ * variant slot — ADR-020.) Both still sit at offset 0 of `struct
+ * example_dp_vk`, so the cast below is the same trick as `example_dp_vk()`.
+ *
+ * A GPU weaver is `CANVAS` and may equally leave this NULL — that is what the
+ * runtime assumes when the slot is absent. A plug-in for a display that weaves
+ * in its own hardware (FPGA/ASIC) MUST answer honestly: `REGION` if its chip
+ * takes a "weave only this rect" descriptor (windowed apps work), `SCANOUT` if
+ * it transforms the whole incoming frame (only a fullscreen, panel-scoped
+ * presentation can be correct). See example_processor_d3d11.cpp for the fuller
+ * discussion and the packed-frame process_atlas that goes with it.
+ */
+static bool
+example_dp_vk_get_scanout_caps(struct xrt_display_processor_vk *xdp, struct xrt_dp_scanout_caps *out_caps)
+{
+	(void)xdp;
+	// Honour the caller's struct_size — never write past what the runtime
+	// allocated (ADR-020).
+	if (out_caps == NULL || out_caps->struct_size < XRT_DP_SCANOUT_CAPS_SIZE_V1) {
+		return false;
+	}
+
+	// VENDOR TODO: return a constant that matches your hardware.
+	const char *v = getenv("DXR_EXAMPLE_WEAVE_SCOPE");
+	enum xrt_dp_weave_scope scope = XRT_DP_WEAVE_SCOPE_CANVAS;
+	if (v != NULL && strcmp(v, "region") == 0) {
+		scope = XRT_DP_WEAVE_SCOPE_REGION;
+	} else if (v != NULL && strcmp(v, "scanout") == 0) {
+		scope = XRT_DP_WEAVE_SCOPE_SCANOUT;
+	}
+
+	out_caps->weave_scope = (uint32_t)scope;
+	for (size_t i = 0; i < sizeof(out_caps->reserved) / sizeof(out_caps->reserved[0]); i++) {
+		out_caps->reserved[i] = 0; // reserved words MUST be zeroed.
+	}
+	return true;
+}
+#endif // XRT_DP_VK_HAS_SCANOUT_CAPS
+
+
 /*
  *
  * Factory — matches xrt_dp_factory_vk_fn_t.
@@ -250,6 +299,10 @@ example_dp_factory_vk(void *vk_bundle,
 	// appended variant slots (set_transparent_background, notify_target_recreated,
 	// set_shared_texture_present) stay NULL — all NULL-safe via XRT_DP_HAS_SLOT.
 	// VENDOR TODO: implement the ones your product needs.
+#ifdef XRT_DP_VK_HAS_SCANOUT_CAPS
+	// On the VARIANT (dp->base), not the embedded base — see the note above it.
+	dp->base.get_scanout_caps = example_dp_vk_get_scanout_caps;
+#endif
 
 	U_LOG_W("example_dp VK: created STUB passthrough blit — VENDOR TODO: replace process_atlas");
 	*out_xdp = &dp->base.base;
