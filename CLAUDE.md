@@ -24,7 +24,10 @@ template un-buildable on a clean machine, it's wrong for this repo.
   vtable. The ABI entry point. Model: `sim_display_plugin.c` / `leia_plugin.c`.
 - `src/drv_example/example_device.c` — the `xrt_device` (panel geometry + rendering
   modes). Model: `leia_device.c`.
-- `src/drv_example/example_processor_d3d11.cpp` — D3D11 DP; stub column-interlace weave.
+- `src/drv_example/example_processor_d3d11.cpp` — D3D11 DP; stub column-interlace
+  weave, plus a hardware-weave shape (`DXR_EXAMPLE_WEAVE_MODE=hardware`) for
+  displays whose FPGA/ASIC weaves during scanout, and a weave-scope declaration
+  (`get_scanout_caps`, `#ifdef`-guarded so an older runtime pin still builds).
 - `src/drv_example/example_processor_vk.c` — Vulkan DP (the `xrt_display_processor_vk`
   variant); stub passthrough-blit weave.
 - `installer/` — NSIS stub that registers the plug-in in
@@ -36,6 +39,12 @@ template un-buildable on a clean machine, it's wrong for this repo.
 2. Replace `process_atlas` in the DP files with the real weaver (the ONE
    mandatory change). Only `process_atlas` + `destroy` are mandatory DP slots;
    the other ~17/22 are optional and NULL-safe (`XRT_DP_HAS_SLOT`, ADR-020).
+   A HARDWARE-weaving display replaces it with a passthrough instead: the atlas
+   already is the packed frame once the declared tile geometry matches the chip
+   (2x1 = side-by-side half, 1x2 = top-and-bottom, NxM = quilt). Such a plug-in
+   MUST also return REGION or SCANOUT from `get_scanout_caps` — the runtime
+   cannot infer it, and SCANOUT is what tells it a windowed presentation can
+   never be correct.
 3. Make `example_plugin_probe` detect real hardware + decline cleanly when
    absent; drop the installer `ProbeOrder` from 200 (fallback) into 1–99.
 4. Fill real geometry + eye-tracking capability in `example_plugin_get_display_info`
