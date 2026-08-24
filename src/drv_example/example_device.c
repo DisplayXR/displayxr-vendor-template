@@ -222,6 +222,29 @@ example_hmd_create(void)
 	// per-mode tiles into subrects — see docs/specs/runtime/multiview-tiling.md.
 	// VENDOR TODO: add your real modes here (e.g. an N-view lenticular mode
 	// with tile_columns * tile_rows == view_count). Keep 2D as mode 0.
+	//
+	// IF YOUR DISPLAY WEAVES IN HARDWARE (FPGA/ASIC), THIS IS THE IMPORTANT
+	// FILE, not the weaver. Your chip is fed an ordinary video frame carrying a
+	// PACKED layout, and the tile geometry you declare here IS that layout —
+	// the compositor hands your process_atlas a tile_columns x tile_rows grid
+	// at panel size, so when the geometry matches what the chip expects there
+	// is nothing left to rearrange and process_atlas is a passthrough (see
+	// DXR_EXAMPLE_WEAVE_MODE=hardware in example_processor_d3d11.cpp):
+	//
+	//     side-by-side, half width  -> view_count 2, tile 2x1, scale 0.5, 1.0
+	//     top-and-bottom, half high -> view_count 2, tile 1x2, scale 1.0, 0.5
+	//     N-view quilt              -> view_count N, any grid, scale 1/cols, 1/rows
+	//
+	// (XRT_MAX_VIEWS is 8, and it is embedded by value in xrt_device — a chip
+	// wanting more views than that needs a runtime ABI change, not a plug-in.)
+	//
+	// The 2D + 3D pair below is deliberately 1x1 @ 1.0,1.0 and 2x1 @ 0.5,1.0.
+	// That choice is worth keeping even if you only ever ship SBS: the app's
+	// swapchain is sized to the per-dimension worst case across all modes, so
+	// with these two the envelope is exactly W x H and BOTH modes fill it —
+	// which is the only condition under which the runtime may skip its crop and
+	// hand your DP the app's swapchain directly (u_tiling_can_zero_copy,
+	// ADR-030). A 0.5 x 0.5 3D mode never qualifies and always costs a copy.
 	hmd->base.rendering_mode_count = 2;
 
 	// Mode 0: 2D (mono, full-res, 1x1 tile). Untracked (mode_flags = 0).

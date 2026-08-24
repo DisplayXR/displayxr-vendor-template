@@ -64,7 +64,7 @@ else()
     # XRT_PLUGIN_API_VERSION_CURRENT from the headers of whichever runtime this tag
     # fetches (src/drv_example/example_plugin.c), so bumping the tag re-pairs the
     # ABI automatically.
-    set(DXR_RUNTIME_GIT_TAG "v2.7.1" CACHE STRING
+    set(DXR_RUNTIME_GIT_TAG "v2.12.0" CACHE STRING
         "displayxr-runtime git ref to fetch (pin to a release tag for reproducible builds).")
     message(STATUS "Fetching displayxr-runtime via FetchContent @ ${DXR_RUNTIME_GIT_TAG}")
     FetchContent_Declare(
